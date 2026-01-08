@@ -34,7 +34,115 @@ app.MapGet("/weatherforecast", () =>
 .WithName("GetWeatherForecast")
 .WithOpenApi();
 
-app.MapPost("/api/bet", (BetRequest request) => 
+app.MapPost("/api/bet", (List<BetRequest> request) => 
+{
+    var context = GenerateBetContext();
+
+    var responses = new List<BetResponse>();
+    foreach(var bet in request)
+    {
+        var payment = CalculateBetPayout(bet, context);
+
+        if(bet.BetType == BetType.COLUMN && (bet.Column < 1 || bet.Column > 3))
+        {
+           responses.Add(new BetResponse(
+                IsWin: false,
+                PayoutAmount: 0,
+                WinningNumber: -1,
+                Message: "Invalid column. Must be 1, 2 or 3."
+            ));
+            
+            continue;
+        }
+
+        if(bet.BetAmount <= 0)
+        {
+            responses.Add(new BetResponse(
+                IsWin: false,
+                PayoutAmount: 0,
+                WinningNumber: -1,
+                Message: "Bet amount must be greater than zero."
+            ));
+            continue;
+        }
+
+        //Lógica de verde
+        if(bet.BetType == BetType.GREEN && context.WinningNumber == 0)
+        {
+            responses.Add(new BetResponse(
+                IsWin: true,
+                PayoutAmount: bet.BetAmount * 35,
+                WinningNumber: context.WinningNumber,
+                Message: "Bet placed sucessfully."
+            ));
+
+            continue;
+        }
+        
+        if(context.WinningNumber == 0)
+        {
+            responses.Add(new BetResponse(
+                IsWin: false,
+                PayoutAmount: 0,
+                WinningNumber: context.WinningNumber,
+                Message: "Bet placed sucessfully."
+            ));
+            continue;
+        }
+
+        responses.Add(new BetResponse(
+            IsWin: payment > 0,
+            PayoutAmount: payment,
+            WinningNumber: context.WinningNumber,
+            Message: $"Result: {context.WinningNumber} | Win: {payment > 0}"
+        ));
+    }
+
+    return responses;
+});
+
+static decimal CalculateBetPayout(BetRequest request, RouletteContext context)
+{
+    decimal payment = 0m;
+
+    switch(request.BetType)
+    {
+        case BetType.EVEN:
+            if(context.isEven)
+            {
+                payment = request.BetAmount * 2;
+            }
+            break;
+        case BetType.ODD:
+            if(!context.isEven)
+            {
+                payment = request.BetAmount * 2;
+            }
+            break;
+        case BetType.RED:
+            if(context.isRed)
+            {
+                payment = request.BetAmount * 2;
+            }
+            break;
+        case BetType.BLACK:
+            if(!context.isRed)
+            {
+                payment = request.BetAmount * 2;
+            }
+            break;
+        case BetType.COLUMN:
+            if(request.Column == context.WinningColumn)
+            {
+                payment = request.BetAmount * 3;
+            }
+            break;
+    }
+
+    return payment;
+}
+
+static RouletteContext GenerateBetContext()
 {
     var winningNumber = Random.Shared.Next(0, 37); 
 
@@ -55,60 +163,23 @@ app.MapPost("/api/bet", (BetRequest request) =>
     }
 
     //lógica de coluna
-    var winningColumn = 3 - winningNumber % 3;
+    var winningColumn = (winningNumber % 3 == 0 ? 3 : winningNumber % 3);
 
-    var payment = 0m;
-
-    //Lógica de verde
-    if(request.BetType == BetType.GREEN && winningNumber == 0)
-    {
-        return new BetResponse(
-            IsWin: true,
-            PayoutAmount: request.BetAmount * 35,
-            WinningNumber: winningNumber,
-            Message: "Bet placed sucessfully."
-        );
-    } 
-    
-    if(winningNumber == 0)
-    {
-        return new BetResponse(
-            IsWin: false,
-            PayoutAmount: 0,
-            WinningNumber: winningNumber,
-            Message: "Bet placed sucessfully."
-        );
-    }
-
-    if(request.BetType == BetType.EVEN && isEven || request.BetType == BetType.ODD && !isEven)
-    {
-        payment = request.BetAmount * 2;
-    }
-
-    if(request.BetType == BetType.RED && isRed || request.BetType == BetType.BLACK && !isRed)
-    {
-        payment = request.BetAmount * 2;
-    }
-
-    if(request.BetType == BetType.COLUMN && request.Column == winningColumn)
-    {
-        payment = request.BetAmount * 3;
-    }
-
-    return new BetResponse(
-        IsWin: payment > 0,
-        PayoutAmount: (decimal)payment,
+    return new RouletteContext
+    (
         WinningNumber: winningNumber,
-        Message: "isRed: " + isRed + " isEven: " + isEven + " winningColumn: " + winningColumn
+        isEven: isEven,
+        isRed: isRed,
+        WinningColumn: winningColumn
     );
-});
+};
 
 app.Run();
 
 record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
     public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+};
 
 enum BetType
 {
@@ -118,12 +189,19 @@ enum BetType
     RED,
     GREEN,
     COLUMN //5
-}
+};
 
 record BetRequest(
     BetType BetType,
     decimal BetAmount,
     int? Column
+);
+
+record RouletteContext(
+    int WinningNumber,
+    bool isEven,
+    bool isRed,
+    int WinningColumn
 );
 
 record BetResponse(
